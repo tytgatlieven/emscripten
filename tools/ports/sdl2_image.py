@@ -6,7 +6,7 @@
 import os
 
 TAG = 'version_4'
-HASH = '30a7b04652239bccff3cb1fa7cd8ae602791b5f502a96df39585c13ebc4bb2b64ba1598c0d1f5382028d94e04a5ca02185ea06bf7f4b3520f6df4cc253f9dd24'
+HASH = '30A7B04652239BCCFF3CB1FA7CD8AE602791B5F502A96DF39585C13EBC4BB2B64BA1598C0D1F5382028D94E04A5CA02185EA06BF7F4B3520F6DF4CC253F9DD24'
 
 deps = ['sdl2']
 
@@ -18,7 +18,7 @@ def needed(settings):
 def get(ports, settings, shared):
   sdl_build = os.path.join(ports.get_build_dir(), 'sdl2')
   assert os.path.exists(sdl_build), 'You must use SDL2 to use SDL2_image'
-  ports.fetch_project('sdl2_image', 'https://github.com/emscripten-ports/SDL2_image/archive/' + TAG + '.zip', 'SDL2_image-' + TAG, sha512hash=HASH)
+  ports.fetch_project('sdl2_image', 'https://github.com/tytgatlieven/SDL2_image/archive/' + TAG + '.zip', 'SDL2_image-' + TAG, sha512hash=HASH)
 
   settings.SDL2_IMAGE_FORMATS.sort()
   formats = '-'.join(settings.SDL2_IMAGE_FORMATS)
