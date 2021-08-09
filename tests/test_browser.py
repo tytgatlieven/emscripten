@@ -5020,7 +5020,7 @@ window.close = function() {
   # Tests that -s MINIMAL_RUNTIME=1 works well in different build modes
   def test_minimal_runtime_hello_world(self):
     for args in [[], ['-s', 'MINIMAL_RUNTIME_STREAMING_WASM_COMPILATION', '--closure=1'], ['-s', 'MINIMAL_RUNTIME_STREAMING_WASM_INSTANTIATION', '--closure', '1']]:
-      self.btest(test_file('small_hello_world.c'), '0', args=args + ['-s', 'MINIMAL_RUNTIME'])
+      self.btest_exit(test_file('small_hello_world.c'), args=args + ['-s', 'MINIMAL_RUNTIME'])
 
   @requires_threads
   def test_offset_converter(self, *args):
@@ -5031,13 +5031,14 @@ window.close = function() {
     self.btest_exit(test_file('browser/test_emscripten_unwind_to_js_event_loop.c'))
 
   def test_wasm2js_fallback(self):
+    self.set_setting('EXIT_RUNTIME')
     for args in [[], ['-s', 'MINIMAL_RUNTIME']]:
       self.compile_btest([test_file('small_hello_world.c'), '-s', 'WASM=2', '-o', 'test.html'] + args)
 
       # First run with WebAssembly support enabled
       # Move the Wasm2js fallback away to test it is not accidentally getting loaded.
       os.rename('test.wasm.js', 'test.wasm.js.unused')
-      self.run_browser('test.html', 'hello!', '/report_result?0')
+      self.run_browser('test.html', 'hello!', '/report_result?exit:0')
       os.rename('test.wasm.js.unused', 'test.wasm.js')
 
       # Then disable WebAssembly support in VM, and try again.. Should still work with Wasm2JS fallback.
@@ -5045,20 +5046,21 @@ window.close = function() {
       html = html.replace('<body>', '<body><script>delete WebAssembly;</script>')
       open('test.html', 'w').write(html)
       os.remove('test.wasm') # Also delete the Wasm file to test that it is not attempted to be loaded.
-      self.run_browser('test.html', 'hello!', '/report_result?0')
+      self.run_browser('test.html', 'hello!', '/report_result?exit:0')
 
   def test_wasm2js_fallback_on_wasm_compilation_failure(self):
+    self.set_setting('EXIT_RUNTIME')
     for args in [[], ['-s', 'MINIMAL_RUNTIME']]:
       self.compile_btest([test_file('small_hello_world.c'), '-s', 'WASM=2', '-o', 'test.html'] + args)
 
       # Run without the .wasm.js file present: with Wasm support, the page should still run
       os.rename('test.wasm.js', 'test.wasm.js.unused')
-      self.run_browser('test.html', 'hello!', '/report_result?0')
+      self.run_browser('test.html', 'hello!', '/report_result?exit:0')
 
       # Restore the .wasm.js file, then corrupt the .wasm file, that should trigger the Wasm2js fallback to run
       os.rename('test.wasm.js.unused', 'test.wasm.js')
       shutil.copyfile('test.js', 'test.wasm')
-      self.run_browser('test.html', 'hello!', '/report_result?0')
+      self.run_browser('test.html', 'hello!', '/report_result?exit:0')
 
   def test_system(self):
     self.btest_exit(test_file('system.c'))
