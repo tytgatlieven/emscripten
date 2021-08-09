@@ -20,7 +20,7 @@ def needed(settings):
 def get(ports, settings, shared):
   sdl_build = os.path.join(ports.get_build_dir(), 'sdl2')
   assert os.path.exists(sdl_build), 'You must use SDL2 to use SDL2_mixer'
-  ports.fetch_project('sdl2_mixer', 'https://github.com/tytgatlieven/SDL2_mixer/archive/' + TAG + '.zip', 'SDL2_mixer-' + TAG, sha512hash=HASH)
+  ports.fetch_project('sdl2_mixer', 'https://github.com/tytgatlieven/SDL2_mixer/archive/' + TAG + '.zip', 'SDL2_mixer-' + TAG)
 
   settings.SDL2_MIXER_FORMATS.sort()
   formats = '-'.join(settings.SDL2_MIXER_FORMATS)
