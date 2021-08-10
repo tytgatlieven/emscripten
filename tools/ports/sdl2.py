@@ -6,7 +6,7 @@
 import os
 
 TAG = 'version_24'
-HASH = '5A8181ACDCCE29CDDA7E7A4CC876602740F5B9DEEBD366ECEC71AE15C4BBF1F352DA4DD0E3C5E0BA8160709DDA0270566D64A6CD3892DA894463ECF8502836AA'
+HASH = '5a8181acdcce29cdda7e7a4cc876602740f5b9deebd366ecec71ae15c4bbf1f352da4dd0e3c5e0ba8160709dda0270566d64a6cd3892da894463ecf8502836aa'
 SUBDIR = 'SDL2-' + TAG
 
 
@@ -20,7 +20,7 @@ def get_lib_name(settings):
 
 def get(ports, settings, shared):
   # get the port
-  ports.fetch_project('sdl2', 'https://github.com/tytgatlieven/SDL2/archive/' + TAG + '.zip', SUBDIR)
+  ports.fetch_project('sdl2', 'https://github.com/emscripten-ports/SDL2/archive/' + TAG + '.zip', SUBDIR, sha512hash=HASH)
 
   def create(final):
     # copy includes to a location so they can be used as 'SDL2/'
