@@ -1,211 +1,80 @@
-#!/usr/bin/env python3
 # Copyright 2014 The Emscripten Authors.  All rights reserved.
 # Emscripten is available under two separate licenses, the MIT license and the
 # University of Illinois/NCSA Open Source License.  Both these licenses can be
 # found in the LICENSE file.
 
-"""Tool to manage building of system libraries and ports.
+import os
 
-In general emcc will build them automatically on demand, so you do not
-strictly need to use this tool, but it gives you more control over the
-process (in particular, if emcc does this automatically, and you are
-running multiple build commands in parallel, confusion can occur).
-"""
-
-import argparse
-import logging
-import sys
-import time
-
-from tools import shared
-from tools import system_libs
-from tools.settings import settings
-import emscripten
+TAG = 'version_4'
+HASH = '30a7b04652239bccff3cb1fa7cd8ae602791b5f502a96df39585c13ebc4bb2b64ba1598c0d1f5382028d94e04a5ca02185ea06bf7f4b3520f6df4cc253f9dd24'
 
 
-SYSTEM_LIBRARIES = system_libs.Library.get_all_variations()
-SYSTEM_TASKS = list(SYSTEM_LIBRARIES.keys())
-
-# This is needed to build the generated_struct_info.json file.
-# It is not a system library, but it needs to be built before running with FROZEN_CACHE.
-SYSTEM_TASKS += ['struct_info']
-
-# Minimal subset of SYSTEM_TASKS used by CI systems to build enough to useful
-MINIMAL_TASKS = [
-    'libcompiler_rt',
-    'libc',
-    'libc++abi',
-    'libc++abi-except',
-    'libc++abi-noexcept',
-    'libc++',
-    'libc++-except',
-    'libc++-noexcept',
-    'libal',
-    'libdlmalloc',
-    'libdlmalloc-debug',
-    'libemmalloc',
-    'libemmalloc-debug',
-    'libemmalloc-memvalidate',
-    'libemmalloc-verbose',
-    'libemmalloc-memvalidate-verbose',
-    'libGL',
-    'libhtml5',
-    'libsockets',
-    'libc_rt_wasm',
-    'libc_rt_wasm-optz',
-    'struct_info',
-    'libstandalonewasm',
-    'crt1',
-    'libunwind-except'
-]
-
-# Variant builds that we want to support for cetain ports
-# TODO: It would be nice if the ports themselves could specify the variants that they
-# support.
-PORT_VARIANTS = {
-    'regal-mt': ('regal', {'USE_PTHREADS': 1}),
-    'harfbuzz-mt': ('harfbuzz', {'USE_PTHREADS': 1}),
-    'sdl2-mt': ('sdl2', {'USE_PTHREADS': 1}),
-    'sdl2_mixer_mp3': ('sdl2_mixer', {'SDL2_MIXER_FORMATS': ["mp3"]}),
-    'sdl2_mixer_none': ('sdl2_mixer', {'SDL2_MIXER_FORMATS': []}),
-    'sdl2_image_png': ('sdl2_image', {'SDL2_IMAGE_FORMATS': ["png"]}),
-    'sdl2_image_jpg': ('sdl2_image', {'SDL2_IMAGE_FORMATS': ["jpg"]}),
-}
-
-PORTS = sorted(list(system_libs.ports.ports_by_name.keys()) + list(PORT_VARIANTS.keys()))
-
-temp_files = shared.configuration.get_temp_files()
-logger = logging.getLogger('embuilder')
-force = False
-legacy_prefixes = {
-  'libgl': 'libGL',
-}
+def needed(settings):
+  return settings.USE_SDL_IMAGE == 2
 
 
-def get_help():
-  all_tasks = SYSTEM_TASKS + PORTS
-  all_tasks.sort()
-  return '''
-Available targets:
+def get(ports, settings, shared):
+  sdl_build = os.path.join(ports.get_build_dir(), 'sdl2')
+  assert os.path.exists(sdl_build), 'You must use SDL2 to use SDL2_image'
+  ports.fetch_project('sdl2_image', 'https://github.com/emscripten-ports/SDL2_image/archive/' + TAG + '.zip', 'SDL2_image-' + TAG, sha512hash=HASH)
 
-  build %s
+  settings.SDL2_IMAGE_FORMATS.sort()
+  formats = '-'.join(settings.SDL2_IMAGE_FORMATS)
 
-Issuing 'embuilder.py build ALL' causes each task to be built.
-''' % '\n        '.join(all_tasks)
+  libname = 'libSDL2_image'
+  if formats != '':
+    libname += '_' + formats
+  libname += '.a'
 
+  def create(final):
+    src_dir = os.path.join(ports.get_dir(), 'sdl2_image', 'SDL2_image-' + TAG)
+    ports.install_headers(src_dir, target='SDL2')
+    srcs = '''IMG.c IMG_bmp.c IMG_gif.c IMG_jpg.c IMG_lbm.c IMG_pcx.c IMG_png.c IMG_pnm.c IMG_tga.c
+              IMG_tif.c IMG_xcf.c IMG_xpm.c IMG_xv.c IMG_webp.c IMG_ImageIO.m'''.split()
+    commands = []
+    o_s = []
+    defs = []
 
-def build_port(port_name):
-  if port_name in PORT_VARIANTS:
-    port_name, extra_settings = PORT_VARIANTS[port_name]
-    old_settings = settings.dict().copy()
-    for key, value in extra_settings.items():
-      setattr(settings, key, value)
-  else:
-    old_settings = None
+    for fmt in settings.SDL2_IMAGE_FORMATS:
+      defs.append('-DLOAD_' + fmt.upper())
 
-  if force:
-    system_libs.clear_port(port_name, settings)
+    if 'png' in settings.SDL2_IMAGE_FORMATS:
+      defs += ['-s', 'USE_LIBPNG=1']
 
-  system_libs.build_port(port_name, settings)
-  if old_settings:
-    settings.dict().update(old_settings)
+    if 'jpg' in settings.SDL2_IMAGE_FORMATS:
+      defs += ['-s', 'USE_LIBJPEG=1']
 
+    for src in srcs:
+      o = os.path.join(ports.get_build_dir(), 'sdl2_image', src + '.o')
+      commands.append([shared.EMCC, '-c', os.path.join(src_dir, src),
+                       '-O2', '-s', 'USE_SDL=2', '-o', o, '-w'] + defs)
+      o_s.append(o)
+    shared.safe_ensure_dirs(os.path.dirname(o_s[0]))
+    ports.run_commands(commands)
+    ports.create_lib(final, o_s)
 
-def main():
-  global force
-
-  all_build_start_time = time.time()
-
-  parser = argparse.ArgumentParser(description=__doc__,
-                                   formatter_class=argparse.RawDescriptionHelpFormatter,
-                                   epilog=get_help())
-  parser.add_argument('--lto', action='store_true', help='build bitcode object for LTO')
-  parser.add_argument('--pic', action='store_true',
-                      help='build relocatable objects for suitable for dynamic linking')
-  parser.add_argument('--force', action='store_true',
-                      help='force rebuild of target (by removing it first)')
-  parser.add_argument('operation', help='currently only "build" is supported')
-  parser.add_argument('targets', nargs='+', help='see below')
-  args = parser.parse_args()
-
-  if args.operation != 'build':
-    shared.exit_with_error('unfamiliar operation: ' + args.operation)
-
-  # process flags
-
-  # Check sanity so that if settings file has changed, the cache is cleared here.
-  # Otherwise, the cache will clear in an emcc process, which is invoked while building
-  # a system library into the cache, causing trouble.
-  shared.check_sanity()
-
-  if args.lto:
-    settings.LTO = "full"
-
-  if args.pic:
-    settings.RELOCATABLE = 1
-
-  if args.force:
-    force = True
-
-  # process tasks
-  auto_tasks = False
-  tasks = args.targets
-  if 'SYSTEM' in tasks:
-    tasks = SYSTEM_TASKS
-    auto_tasks = True
-  elif 'USER' in tasks:
-    tasks = PORTS
-    auto_tasks = True
-  elif 'MINIMAL' in tasks:
-    tasks = MINIMAL_TASKS
-    auto_tasks = True
-  elif 'ALL' in tasks:
-    tasks = SYSTEM_TASKS + PORTS
-    auto_tasks = True
-  if auto_tasks:
-    # cocos2d: must be ported, errors on
-    # "Cannot recognize the target platform; are you targeting an unsupported platform?"
-    skip_tasks = ['cocos2d']
-    tasks = [x for x in tasks if x not in skip_tasks]
-    print('Building targets: %s' % ' '.join(tasks))
-  for what in tasks:
-    for old, new in legacy_prefixes.items():
-      if what.startswith(old):
-        what = what.replace(old, new)
-    logger.info('building and verifying ' + what)
-    start_time = time.time()
-    if what in SYSTEM_LIBRARIES:
-      library = SYSTEM_LIBRARIES[what]
-      if force:
-        library.erase()
-      library.get_path()
-    elif what == 'sysroot':
-      if force:
-        shared.Cache.erase_file('sysroot_install.stamp')
-      system_libs.ensure_sysroot()
-    elif what == 'struct_info':
-      if force:
-        shared.Cache.erase_file('generated_struct_info.json')
-      emscripten.generate_struct_info()
-    elif what in PORTS:
-      build_port(what)
-    else:
-      logger.error('unfamiliar build target: ' + what)
-      return 1
-
-    time_taken = time.time() - start_time
-    logger.info('...success. Took %s(%.2fs)' % (('%02d:%02d mins ' % (time_taken // 60, time_taken % 60) if time_taken >= 60 else ''), time_taken))
-
-  if len(tasks) > 1:
-    all_build_time_taken = time.time() - all_build_start_time
-    logger.info('Built %d targets in %s(%.2fs)' % (len(tasks), ('%02d:%02d mins ' % (all_build_time_taken // 60, all_build_time_taken % 60) if all_build_time_taken >= 60 else ''), all_build_time_taken))
-
-  return 0
+  return [shared.Cache.get_lib(libname, create, what='port')]
 
 
-if __name__ == '__main__':
-  try:
-    sys.exit(main())
-  except KeyboardInterrupt:
-    logger.warning("KeyboardInterrupt")
-    sys.exit(1)
+def clear(ports, settings, shared):
+  shared.Cache.get_path('libSDL2_image.a')
+
+
+def process_dependencies(settings):
+  global deps
+  deps = ['sdl2']
+  settings.USE_SDL = 2
+  if 'png' in settings.SDL2_IMAGE_FORMATS:
+    deps.append('libpng')
+    settings.USE_LIBPNG = 1
+  if 'jpg' in settings.SDL2_IMAGE_FORMATS:
+    deps.append('libjpeg')
+    settings.USE_LIBJPEG = 1
+
+
+def process_args(ports):
+  return []
+
+
+def show():
+  return 'SDL2_image (USE_SDL_IMAGE=2; zlib license)'
