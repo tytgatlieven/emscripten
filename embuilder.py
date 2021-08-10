@@ -1,75 +1,105 @@
-# Copyright 2014 The Emscripten Authors.  All rights reserved.
+# Copyright 2016 The Emscripten Authors.  All rights reserved.
 # Emscripten is available under two separate licenses, the MIT license and the
 # University of Illinois/NCSA Open Source License.  Both these licenses can be
 # found in the LICENSE file.
 
 import os
+import shutil
+import logging
 
-TAG = 'version_4'
-HASH = '30a7b04652239bccff3cb1fa7cd8ae602791b5f502a96df39585c13ebc4bb2b64ba1598c0d1f5382028d94e04a5ca02185ea06bf7f4b3520f6df4cc253f9dd24'
+TAG = 'release-2.0.2'
+HASH = 'b9d03061d177f20f4e03f3e3553afd7bfe0c05da7b9a774312b389318e747cf9724e0475e9afff6a64ce31bab0217e2afb2619d75556753fbbb6ecafa9775219'
 
 
 def needed(settings):
-  return settings.USE_SDL_IMAGE == 2
+  return settings.USE_SDL_MIXER == 2
 
 
 def get(ports, settings, shared):
   sdl_build = os.path.join(ports.get_build_dir(), 'sdl2')
-  assert os.path.exists(sdl_build), 'You must use SDL2 to use SDL2_image'
-  ports.fetch_project('sdl2_image', 'https://github.com/emscripten-ports/SDL2_image/archive/' + TAG + '.zip', 'SDL2_image-' + TAG, sha512hash=HASH)
+  assert os.path.exists(sdl_build), 'You must use SDL2 to use SDL2_mixer'
+  ports.fetch_project('sdl2_mixer', 'https://github.com/emscripten-ports/SDL2_mixer/archive/' + TAG + '.zip', 'SDL2_mixer-' + TAG, sha512hash=HASH)
 
-  settings.SDL2_IMAGE_FORMATS.sort()
-  formats = '-'.join(settings.SDL2_IMAGE_FORMATS)
+  settings.SDL2_MIXER_FORMATS.sort()
+  formats = '-'.join(settings.SDL2_MIXER_FORMATS)
 
-  libname = 'libSDL2_image'
+  libname = 'libSDL2_mixer'
   if formats != '':
     libname += '_' + formats
   libname += '.a'
 
   def create(final):
-    src_dir = os.path.join(ports.get_dir(), 'sdl2_image', 'SDL2_image-' + TAG)
-    ports.install_headers(src_dir, target='SDL2')
-    srcs = '''IMG.c IMG_bmp.c IMG_gif.c IMG_jpg.c IMG_lbm.c IMG_pcx.c IMG_png.c IMG_pnm.c IMG_tga.c
-              IMG_tif.c IMG_xcf.c IMG_xpm.c IMG_xv.c IMG_webp.c IMG_ImageIO.m'''.split()
-    commands = []
-    o_s = []
-    defs = []
+    logging.info('building port: sdl2_mixer')
 
-    for fmt in settings.SDL2_IMAGE_FORMATS:
-      defs.append('-DLOAD_' + fmt.upper())
+    source_path = os.path.join(ports.get_dir(), 'sdl2_mixer', 'SDL2_mixer-' + TAG)
+    dest_path = os.path.join(ports.get_build_dir(), 'sdl2_mixer')
 
-    if 'png' in settings.SDL2_IMAGE_FORMATS:
-      defs += ['-s', 'USE_LIBPNG=1']
+    shutil.rmtree(dest_path, ignore_errors=True)
+    shutil.copytree(source_path, dest_path)
 
-    if 'jpg' in settings.SDL2_IMAGE_FORMATS:
-      defs += ['-s', 'USE_LIBJPEG=1']
+    flags = [
+      '-s', 'USE_SDL=2',
+      '-O2',
+      '-DMUSIC_WAV',
+    ]
 
-    for src in srcs:
-      o = os.path.join(ports.get_build_dir(), 'sdl2_image', src + '.o')
-      commands.append([shared.EMCC, '-c', os.path.join(src_dir, src),
-                       '-O2', '-s', 'USE_SDL=2', '-o', o, '-w'] + defs)
-      o_s.append(o)
-    shared.safe_ensure_dirs(os.path.dirname(o_s[0]))
-    ports.run_commands(commands)
-    ports.create_lib(final, o_s)
+    if "ogg" in settings.SDL2_MIXER_FORMATS:
+      flags += [
+        '-s', 'USE_VORBIS=1',
+        '-DMUSIC_OGG',
+      ]
+
+    if "mp3" in settings.SDL2_MIXER_FORMATS:
+      flags += [
+        '-s', 'USE_MPG123=1',
+        '-DMUSIC_MP3_MPG123',
+      ]
+
+    if "mod" in settings.SDL2_MIXER_FORMATS:
+      flags += [
+        '-s', 'USE_MODPLUG=1',
+        '-DMUSIC_MOD_MODPLUG',
+      ]
+
+    ports.build_port(
+      dest_path,
+      final,
+      includes=[],
+      flags=flags,
+      exclude_files=[
+        'playmus.c',
+        'playwave.c',
+      ],
+      exclude_dirs=[
+        'native_midi',
+        'timidity',
+        'external',
+      ]
+    )
+
+    # copy header to a location so it can be used as 'SDL2/'
+    ports.install_headers(source_path, pattern='SDL_*.h', target='SDL2')
 
   return [shared.Cache.get_lib(libname, create, what='port')]
 
 
 def clear(ports, settings, shared):
-  shared.Cache.get_path('libSDL2_image.a')
+  shared.Cache.erase_lib('libSDL2_mixer.a')
 
 
 def process_dependencies(settings):
   global deps
   deps = ['sdl2']
   settings.USE_SDL = 2
-  if 'png' in settings.SDL2_IMAGE_FORMATS:
-    deps.append('libpng')
-    settings.USE_LIBPNG = 1
-  if 'jpg' in settings.SDL2_IMAGE_FORMATS:
-    deps.append('libjpeg')
-    settings.USE_LIBJPEG = 1
+  if "ogg" in settings.SDL2_MIXER_FORMATS:
+    deps.append('vorbis')
+    settings.USE_VORBIS = 1
+  if "mp3" in settings.SDL2_MIXER_FORMATS:
+    deps.append('mpg123')
+    settings.USE_MPG123 = 1
+  if "mod" in settings.SDL2_MIXER_FORMATS:
+    deps.append('libmodplug')
+    settings.USE_MODPLUG = 1
 
 
 def process_args(ports):
@@ -77,4 +107,4 @@ def process_args(ports):
 
 
 def show():
-  return 'SDL2_image (USE_SDL_IMAGE=2; zlib license)'
+  return 'SDL2_mixer (USE_SDL_MIXER=2; zlib license)'
