@@ -81,33 +81,85 @@ var LibraryDylink = {
       var value = exports[symName];
 #if !WASM_BIGINT
       if (symName.startsWith('orig$')) {
-        symName = symName.split('$')[1];
+        symName = symName.substring(5);
         replace = true;
       }
 #endif
 
-      if (!GOT[symName]) {
-        GOT[symName] = new WebAssembly.Global({'value': 'i32', 'mutable': true});
+      baseName=symName;
+#if EMULATE_FUNCTION_POINTER_CASTS==1
+      const FPCAST_PREFIX="byn$fpcast-emu$";
+      const FPCAST_DYNCALL_PREFIX="$no-fpcast-emu$";
+      var dyncallName;
+      var is_fpcast=false;
+      var is_nonfpcast=false;
+      var newFn;
+      if(typeof(value) === 'function')
+      {
+          if(symName.startsWith(FPCAST_PREFIX))
+          {
+              baseName=symName.substr(FPCAST_PREFIX.length);
+              dyncallName=FPCAST_DYNCALL_PREFIX+baseName;
+              is_fpcast=true;
+          }else
+          {
+             if(FPCAST_PREFIX+symName in exports)
+             {
+                 baseName=FPCAST_DYNCALL_PREFIX+symName;
+                 is_nonfpcast=true;
+             }
+          }
       }
-      if (replace || GOT[symName].value == 0) {
+#endif
+      if (!GOT[baseName]) {
+        GOT[baseName] = new WebAssembly.Global({value: 'i32', mutable: true});
+      }
+      if (replace || GOT[baseName].value == 0) {
         if (typeof value === 'function') {
-          GOT[symName].value = addFunctionWasm(value);
+          newFn=addFunctionWasm(value);
+          GOT[baseName].value = newFn
 #if DYLINK_DEBUG
-          err("updateGOT FUNC: " + symName + ' : ' + GOT[symName].value);
+          err("updateGOT FUNC: " + symName + ' : ' + GOT[baseName].value);
 #endif
         } else if (typeof value === 'number') {
-          GOT[symName].value = value;
+          GOT[baseName].value = value;
         } else {
           err("unhandled export type for `" + symName + "`: " + (typeof value));
         }
 #if DYLINK_DEBUG
-        err("updateGOT: " + symName + ' : ' + GOT[symName].value);
+        err("updateGOT: " + baseName + "("+ symName + ")" + ' : ' + GOT[symName].value);
 #endif
       }
 #if DYLINK_DEBUG
-      else if (GOT[symName].value != value) {
-        err("updateGOT: EXISTING SYMBOL: " + symName + ' : ' + GOT[symName].value + " " + value);
+      else if (GOT[baseName].value != value) {
+        err("updateGOT: EXISTING SYMBOL: " + symName + ' : ' + GOT[baseName].value + " " + value);
       }
+#endif
+#if EMULATE_FUNCTION_POINTER_CASTS==1
+        // update map for dynamic calls so they can bypass fp casts
+        if(!newFn)newFn= GOT[baseName].value;
+        if(is_fpcast && newFn)
+        {
+            dyncallGOT=GOT[dyncallName]
+            if(dyncallGOT){
+                dcVal=dyncallGOT.value;
+                if(dcVal)
+                {
+                    dyncallInvokeMap[newFn]=dcVal;
+                }
+            }
+        }else if(is_nonfpcast && newFn)
+        {
+            fpcGOT=GOT[symName];
+            if(fpcGOT)
+            {
+                fpVal=fpcGOT.value;
+                if(fpVal)
+                {
+                    dyncallInvokeMap[fpVal]=newFn;
+                }
+            }
+        }
 #endif
     }
 #if DYLINK_DEBUG
@@ -775,6 +827,8 @@ var LibraryDylink = {
       var jsflags = {
         loadAsync: true,
         fs: FS, // load libraries from provided filesystem
+        allowUndefined: true, // allow undefined symbols - otherwise scipy won't
+                              // import because modules have cross dependencies
       }
       var promise = dlopenInternal(filename, flags, jsflags);
       promise.then(wakeUp).catch(function() { wakeUp(0) });
@@ -783,6 +837,8 @@ var LibraryDylink = {
     var jsflags = {
       loadAsync: false,
       fs: FS, // load libraries from provided filesystem
+      allowUndefined: true, // allow undefined symbols - otherwise scipy won't
+                              // import because modules have cross dependencies
     }
     return dlopenInternal(filename, flags, jsflags);
 #endif
@@ -842,6 +898,10 @@ var LibraryDylink = {
     // http://pubs.opengroup.org/onlinepubs/009695399/functions/dlsym.html
     symbol = UTF8ToString(symbol);
     var result;
+#if EMULATE_FUNCTION_POINTER_CASTS==1
+      // look for fpcast-emu version as this is deffo going to be a function pointer that we return
+      symbol="byn$fpcast-emu$"+symbol
+#endif
 
     if (handle == {{{ cDefine('RTLD_DEFAULT') }}}) {
       result = resolveGlobalSymbol(symbol, true);
